@@ -1,5 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
+import http from "node:http";
 import type { ChildProcess } from "node:child_process";
 import type { ModelAssignment, RunningModel } from "./types.js";
 
@@ -39,6 +40,34 @@ function getLlamaServerPath(): string {
   return _llamaServerPath;
 }
 
+function wait(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function waitForReady(host: string, port: number, timeout: number): Promise<boolean> {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    function poll() {
+      if (Date.now() - start > timeout) return resolve(false);
+      const req = http.get({ host, port, path: "/v1/models", timeout: 5000 }, (res) => {
+        const ready = res.statusCode === 200;
+        res.destroy();
+        if (ready) return resolve(true);
+        setTimeout(poll, 2000);
+      });
+      req.on("error", () => {
+        req.destroy();
+        setTimeout(poll, 2000);
+      });
+      req.on("timeout", () => {
+        req.destroy();
+        setTimeout(poll, 2000);
+      });
+    }
+    poll();
+  });
+}
+
 export function startServer(
   assignment: ModelAssignment
 ): Promise<RunningModel | { error: string }> {
@@ -67,25 +96,47 @@ export function startServer(
 
       const key = `${assignment.role}`;
 
+      let resolved = false;
+
       proc.on("error", (err) => {
-        resolve({ error: `Error iniciando llama-server: ${err.message}` });
+        if (!resolved) {
+          resolved = true;
+          resolve({ error: `Error iniciando llama-server: ${err.message}` });
+        }
       });
 
       proc.on("spawn", () => {
         runningServers.set(key, proc);
         proc.unref();
-        resolve({
-          pid: proc.pid ?? 0,
-          assignment,
-          startedAt,
-        });
+        console.log(`  ${assignment.role} esperando a que el servidor este listo en :${assignment.port}...`);
       });
 
       proc.on("exit", (code, signal) => {
         runningServers.delete(key);
-        if (code !== 0 && code !== null) {
-          console.error(`  ${code} llama-server (${assignment.role}) termino con codigo ${code} (señal: ${signal})`);
+        if (!resolved) {
+          resolved = true;
+          resolve({ error: `llama-server (${assignment.role}) termino antes de estar listo. Código: ${code ?? "unknown"}${signal ? `, señal: ${signal}` : ""}` });
         }
+      });
+
+      waitForReady("127.0.0.1", assignment.port, 120_000).then((ready) => {
+        if (resolved) return;
+        if (!ready) {
+          resolved = true;
+          resolve({ error: `llama-server (${assignment.role}) no respondio en :${assignment.port} tras 120s` });
+          return;
+        }
+        if (!proc.pid) {
+          resolved = true;
+          resolve({ error: `llama-server (${assignment.role}) murio justo despues de iniciar` });
+          return;
+        }
+        resolved = true;
+        resolve({
+          pid: proc.pid,
+          assignment,
+          startedAt,
+        });
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

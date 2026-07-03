@@ -202,13 +202,14 @@ export async function startInteractive(
 
   const running: RunningModel[] = [];
   for (const s of selected) {
+    console.log(`\n  ${color.dim("Lanzando")} ${s.role} en :${s.port}...`);
     const result = await startServer({ role: s.role, file: s.file, path: s.path, port: s.port });
     if ("error" in result) {
-      stopAll();
-      return { ok: false, running: [], message: result.error };
+      console.log(`  ${color.red("✗")} ${result.error}`);
+      continue;
     }
     running.push(result);
-    console.log(`  ${color.green("✓")} llama-server iniciado (PID ${result.pid}) en puerto ${s.port} — ${s.file}`);
+    console.log(`  ${color.green("✓")} ${s.role} listo (PID ${result.pid}) — ${s.file}`);
   }
 
   const state: ModelEngineState = {
@@ -217,6 +218,10 @@ export async function startInteractive(
     workMode,
   };
   saveState(state);
+
+  if (running.length === 0) {
+    return { ok: false, running: [], message: "No se pudo iniciar ningun modelo." };
+  }
 
   for (const r of running) {
     const modelName = cleanModelName(r.assignment.file);
@@ -238,7 +243,13 @@ export async function startInteractive(
   }
 
   displayStatus(running);
-  return { ok: true, running, message: "Modelos iniciados correctamente." };
+  const total = selected.length;
+  const started = running.length;
+  const failed = total - started;
+  const msg = failed > 0
+    ? `${started}/${total} modelos iniciados. ${failed} fallaron.`
+    : `${total} modelos iniciados correctamente.`;
+  return { ok: started > 0, running, message: msg };
 }
 
 export function displayStatus(running: RunningModel[]): void {
