@@ -84,6 +84,14 @@ export interface LLMConfig {
     base_url?: string;
     model?: string;
   };
+  workMode?: "uni-model" | "dual-model" | "tree-model";
+  models?: {
+    vramLimitMiB?: number;
+    minioUrl?: string;
+    minioAccessKey?: string;
+    minioSecretKey?: string;
+    localModelsPath?: string;
+  };
 }
 
 export interface HooksConfig {

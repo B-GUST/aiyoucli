@@ -25,6 +25,7 @@ import { proxyTools } from "./proxy-tools.js";
 import { astTools } from "./ast-tools.js";
 import { semanticTools } from "./semantic-tools.js";
 import { modelsTools } from "./models-tools.js";
+import { modelEngineTools } from "./model-engine-tools.js";
 import { rdTools } from "./rd-tools.js";
 
 export function registerAllTools(): void {
@@ -50,5 +51,6 @@ export function registerAllTools(): void {
   registry.registerAll(astTools);
   registry.registerAll(semanticTools);
   registry.registerAll(modelsTools);
+  registry.registerAll(modelEngineTools);
   registry.registerAll(rdTools);
 }

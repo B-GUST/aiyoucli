@@ -13,6 +13,7 @@ import { generateAgentsMd } from "../init/agentsmd-generator.js";
 import { generateSettings } from "../init/settings-generator.js";
 import { interactiveInit } from "../init/interactive.js";
 import { renderStatusline, generateStatuslineScript } from "../statusline/generator.js";
+import { startInteractive, stopInteractive, showStatus } from "../models/manager.js";
 import type { Command, MCPToolResult } from "../types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -929,10 +930,13 @@ const statuslineCommand: Command = {
 
 const modelsCommand: Command = {
   name: "models",
-  description: "Manage local GGUF models (list, optimize recommendations)",
+  description: "Manage local GGUF models (list, optimize, start, stop, status)",
   examples: [
     { command: "aiyoucli models list --path /home/user/models/", description: "List all GGUF files in a directory with quantization details" },
     { command: "aiyoucli models optimize --model llama-3.1-8b", description: "Get Unsloth Dynamic v2.0 upgrade recommendation for a model" },
+    { command: "aiyoucli models start", description: "Interactive assistant to select work mode and launch llama-server" },
+    { command: "aiyoucli models stop", description: "Stop all running llama-server instances" },
+    { command: "aiyoucli models status", description: "Show status of active models" },
     { command: "aiyoucli models list", description: "Scan default .aiyoucli/models/ directory" },
   ],
   subcommands: [
@@ -989,6 +993,38 @@ const modelsCommand: Command = {
         if (!model) { output.error("Model name required: --model <name>"); return; }
         const result = await callTool("models_optimize", { model });
         printJson(result);
+      },
+    },
+    {
+      name: "start",
+      description: "Interactive assistant to select work mode, models, download from MinIO if needed, validate VRAM, and launch llama-server in background",
+      action: async () => {
+        const result = await startInteractive();
+        if (!result.ok) {
+          output.error(result.message);
+        } else {
+          output.log(color.green(result.message));
+        }
+      },
+    },
+    {
+      name: "stop",
+      description: "Stop all running llama-server instances",
+      action: async () => {
+        const result = stopInteractive();
+        if (result.ok) {
+          output.log(color.green(result.message));
+        } else {
+          output.error(result.message);
+        }
+      },
+    },
+    {
+      name: "status",
+      description: "Show status of active models",
+      action: async () => {
+        const status = showStatus();
+        output.log(status);
       },
     },
   ],
