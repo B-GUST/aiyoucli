@@ -6,6 +6,8 @@ import { homedir } from "node:os";
 const MINIO_URL = "http://127.0.0.1:9000";
 const MINIO_CONTAINER = "bgust-minio";
 const MINIO_BUCKET = "llm-models";
+const MINIO_ACCESS_KEY = "minioadmin";
+const MINIO_SECRET_KEY = "minioadmin";
 const MODELS_DIR = join(homedir(), ".aiyoucli", "models");
 
 export function getModelsDir(): string {
@@ -45,21 +47,47 @@ export function listModelsInBucket(): string[] {
   }
 }
 
+export function getFileSizeInBucket(modelFile: string): number {
+  try {
+    const out = execSync(
+      `docker exec ${MINIO_CONTAINER} du -sb /data/${MINIO_BUCKET}/${modelFile} 2>/dev/null | cut -f1`,
+      { encoding: "utf-8", timeout: 10000 }
+    ).trim();
+    return parseInt(out, 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function downloadModel(modelFile: string): { ok: boolean; path: string; message: string } {
   const destDir = getModelsDir();
   const destPath = join(destDir, modelFile);
 
   if (existsSync(destPath)) {
-    return { ok: true, path: destPath, message: `Ya existe localmente: ${modelFile}` };
+    const isFile = execSync(`test -f "${destPath}" && echo "file" || echo "not"`, {
+      encoding: "utf-8", timeout: 3000
+    }).trim();
+    if (isFile === "file") {
+      return { ok: true, path: destPath, message: `Ya existe localmente: ${modelFile}` };
+    }
+    // Remove stale directory artifact from previous docker cp
+    try {
+      execSync(`rm -rf "${destPath}"`, { timeout: 5000 });
+    } catch {
+      return { ok: false, path: "", message: `No se pudo limpiar el directorio corrupto: ${modelFile}` };
+    }
   }
 
+  const tmpPath = `${destPath}.tmp`;
   try {
     execSync(
-      `docker cp ${MINIO_CONTAINER}:/data/${MINIO_BUCKET}/${modelFile} "${destPath}"`,
-      { timeout: 300000, stdio: "pipe" }
+      `curl --aws-sigv4 "aws:amz:us-east-1:s3" --user "${MINIO_ACCESS_KEY}:${MINIO_SECRET_KEY}" "http://127.0.0.1:9000/${MINIO_BUCKET}/${modelFile}" -o "${tmpPath}" 2>/dev/null`,
+      { timeout: 600000, stdio: "pipe" }
     );
+    execSync(`mv "${tmpPath}" "${destPath}"`, { timeout: 5000 });
     return { ok: true, path: destPath, message: `Descargado: ${modelFile}` };
   } catch (err) {
+    try { execSync(`rm -f "${tmpPath}"`, { timeout: 3000 }); } catch { /* cleanup */ }
     const msg = err instanceof Error ? err.message : String(err);
     return { ok: false, path: "", message: `Error descargando ${modelFile}: ${msg}` };
   }

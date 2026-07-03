@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
+import { existsSync, statSync, writeFileSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { color } from "../output.js";
@@ -188,7 +188,7 @@ export async function startInteractive(
   }
 
   for (const s of selected) {
-    if (!existsSync(s.path)) {
+    if (!existsSync(s.path) || !statSync(s.path).isFile()) {
       console.log(`  ${color.dim("Descargando")} ${s.file} desde MinIO...`);
       const dl = downloadModel(s.file);
       if (!dl.ok) {

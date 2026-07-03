@@ -132,7 +132,9 @@ export function listLocalModels(modelsPath: string): ModelEntry[] {
   const entries: ModelEntry[] = [];
   for (const file of readdirSync(modelsPath)) {
     if (!file.endsWith(".gguf")) continue;
-    const st = statSync(join(modelsPath, file));
+    const fullPath = join(modelsPath, file);
+    const st = statSync(fullPath);
+    if (!st.isFile()) continue;
     const sizeGB = st.size / (1024 * 1024 * 1024);
     const quant = detectQuant(file);
     entries.push({

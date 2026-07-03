@@ -1,5 +1,5 @@
 import { spawn, execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
 import type { ModelAssignment, RunningModel } from "./types.js";
 
@@ -47,6 +47,10 @@ export function startServer(
       resolve({ error: `Modelo no encontrado: ${assignment.path}` });
       return;
     }
+    if (!statSync(assignment.path).isFile()) {
+      resolve({ error: `La ruta no es un archivo valido: ${assignment.path}` });
+      return;
+    }
 
     const startedAt = new Date().toISOString();
 
@@ -75,6 +79,13 @@ export function startServer(
           assignment,
           startedAt,
         });
+      });
+
+      proc.on("exit", (code, signal) => {
+        runningServers.delete(key);
+        if (code !== 0 && code !== null) {
+          console.error(`  ${code} llama-server (${assignment.role}) termino con codigo ${code} (señal: ${signal})`);
+        }
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
