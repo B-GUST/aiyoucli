@@ -202,7 +202,7 @@ export async function startInteractive(
 
   const running: RunningModel[] = [];
   for (const s of selected) {
-    const result = startServer({ role: s.role, file: s.file, path: s.path, port: s.port });
+    const result = await startServer({ role: s.role, file: s.file, path: s.path, port: s.port });
     if ("error" in result) {
       stopAll();
       return { ok: false, running: [], message: result.error };

@@ -5,40 +5,82 @@ import type { ModelAssignment, RunningModel } from "./types.js";
 
 const runningServers: Map<string, ChildProcess> = new Map();
 
-export function startServer(
-  assignment: ModelAssignment
-): RunningModel | { error: string } {
-  if (!existsSync(assignment.path)) {
-    return { error: `Modelo no encontrado: ${assignment.path}` };
-  }
+let _llamaServerPath: string | null = null;
 
-  const startedAt = new Date().toISOString();
+function getLlamaServerPath(): string {
+  if (_llamaServerPath) return _llamaServerPath;
 
   try {
-    const proc = spawn("llama-server", [
-      "-m", assignment.path,
-      "--port", String(assignment.port),
-      "--host", "127.0.0.1",
-      "--no-webui",
-    ], {
-      stdio: "ignore",
-      detached: true,
-    });
-
-    const key = `${assignment.role}`;
-    runningServers.set(key, proc);
-
-    proc.unref();
-
-    return {
-      pid: proc.pid ?? 0,
-      assignment,
-      startedAt,
-    };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { error: `Error iniciando llama-server: ${msg}` };
+    const result = execSync("which llama-server 2>/dev/null", { encoding: "utf-8", timeout: 5000 }).trim();
+    if (result) {
+      _llamaServerPath = result;
+      return result;
+    }
+  } catch {
+    // not in PATH
   }
+
+  const commonPaths = [
+    "/home/august/code/llama.cpp/build/bin/llama-server",
+    "/usr/local/bin/llama-server",
+    "/usr/bin/llama-server",
+    "/opt/llama.cpp/build/bin/llama-server",
+    "/opt/homebrew/bin/llama-server",
+  ];
+
+  for (const p of commonPaths) {
+    if (existsSync(p)) {
+      _llamaServerPath = p;
+      return p;
+    }
+  }
+
+  _llamaServerPath = "llama-server";
+  return _llamaServerPath;
+}
+
+export function startServer(
+  assignment: ModelAssignment
+): Promise<RunningModel | { error: string }> {
+  return new Promise((resolve) => {
+    if (!existsSync(assignment.path)) {
+      resolve({ error: `Modelo no encontrado: ${assignment.path}` });
+      return;
+    }
+
+    const startedAt = new Date().toISOString();
+
+    try {
+      const binPath = getLlamaServerPath();
+      const proc = spawn(binPath, [
+        "-m", assignment.path,
+        "--port", String(assignment.port),
+        "--host", "127.0.0.1",
+      ], {
+        stdio: "ignore",
+        detached: true,
+      });
+
+      const key = `${assignment.role}`;
+
+      proc.on("error", (err) => {
+        resolve({ error: `Error iniciando llama-server: ${err.message}` });
+      });
+
+      proc.on("spawn", () => {
+        runningServers.set(key, proc);
+        proc.unref();
+        resolve({
+          pid: proc.pid ?? 0,
+          assignment,
+          startedAt,
+        });
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      resolve({ error: `Error iniciando llama-server: ${msg}` });
+    }
+  });
 }
 
 export function stopServer(role: string): boolean {
