@@ -1,5 +1,5 @@
 /**
- * Tool module aggregator — registers all 14 tool modules.
+ * Tool module aggregator — registers all tool modules.
  */
 
 import { registry } from "../client.js";
@@ -21,6 +21,11 @@ import { statuslineTools } from "./statusline-tools.js";
 import { metricsTools } from "./metrics-tools.js";
 import { distillerTools } from "./distiller-tools.js";
 import { skillsTools } from "./skills-tools.js";
+import { proxyTools } from "./proxy-tools.js";
+import { astTools } from "./ast-tools.js";
+import { semanticTools } from "./semantic-tools.js";
+import { modelsTools } from "./models-tools.js";
+import { rdTools } from "./rd-tools.js";
 
 export function registerAllTools(): void {
   registry.registerAll(memoryTools);
@@ -41,4 +46,9 @@ export function registerAllTools(): void {
   registry.registerAll(metricsTools);
   registry.registerAll(distillerTools);
   registry.registerAll(skillsTools);
+  registry.registerAll(proxyTools);
+  registry.registerAll(astTools);
+  registry.registerAll(semanticTools);
+  registry.registerAll(modelsTools);
+  registry.registerAll(rdTools);
 }

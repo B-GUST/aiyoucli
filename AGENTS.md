@@ -67,6 +67,8 @@ aiyoucli (npm package)
     NAPI bindings (src/napi/index.ts)
       Rust core (crates/aiyoucli-napi, 4.3MB binary)
         aiyouvector crates (direct path dependency)
+      Rust proxy (crates/aiyoucli-proxy, standalone NAPI binary)
+        Builds independently — no aiyouvector dependency
 ```
 
 ### Directory Structure
@@ -87,6 +89,15 @@ aiyoucli/
         graph.rs                      # KnowledgeGraph: add_node, add_edge, neighbors, k_hop, remove, stats
         routing.rs                    # Q-Learning router + model tier selection (haiku/sonnet/opus)
         analysis.rs                   # Diff classifier + commit classifier + complexity scorer
+    aiyoucli-proxy/                   # Standalone NAPI binary — no aiyouvector deps
+      Cargo.toml                      # napi, reqwest, tokio, regex
+      build.rs
+      src/
+        lib.rs                        # Gateway, compression, shield, routing, AST, embeddings
+        napi.rs                       # NAPI exports
+        ast.rs                        # Multi-language AST analyzer (JS/TS/Python/Rust/Go/Java)
+        embeddings.rs                 # ONNX embedding client (port 8001)
+        semantic.rs                   # Semantic router (keyword + embedding hybrid)
 
   bin/
     aiyoucli.js                       # CLI entry point (auto-detects MCP mode vs interactive)
@@ -102,15 +113,22 @@ aiyoucli/
 
     napi/
       index.ts                        # NAPI binary loader + TypeScript type re-exports
+      proxy.ts                        # ProxyEngineHandle — TypeScript bridge to aiyoucli-proxy
+
+    metrics/
+      collector.ts                    # Metrics collector — tokens, cost, latency, memory, tool calls
+
+    semantic/
+      agent-profiles.ts               # 8 agent profiles with keyword scoring + hybrid embeddings
 
     mcp/
       server.ts                       # MCP stdio JSON-RPC handler (initialize, tools/list, tools/call)
       client.ts                       # Tool registry + dispatch (with circuit breaker + retry)
       types.ts                        # JSON-RPC message types
       tools/
-        index.ts                      # Registers all 15 tool modules (41 tools total)
+        index.ts                      # Registers all 22 tool modules (76 tools total)
         memory-tools.ts               # 6 tools: init, store, search, count, stats, delete (NAPI)
-        agent-tools.ts                # 4 tools: spawn, list, status, stop (file persistence)
+        agent-tools.ts                # 6 tools: spawn, list, status, stop, record, metrics (file persistence)
         swarm-tools.ts                # 3 tools: init, status, stop (file persistence)
         task-tools.ts                 # 4 tools: create, list, status, complete (file persistence)
         session-tools.ts              # 3 tools: start, end, list (file persistence)
@@ -124,9 +142,16 @@ aiyoucli/
         performance-tools.ts          # 1 tool: benchmark (NAPI vector perf)
         coordination-tools.ts         # 1 tool: status (aggregates swarm + agents + tasks)
         statusline-tools.ts           # 1 tool: statusline dashboard
+        metrics-tools.ts              # 8 tools: snapshot, record_tokens, cost, memory, latency, tools_summary, save, reset
+        distiller-tools.ts            # 2 tools: distill_markdown, distill_file
+        skills-tools.ts               # 3 tools: sync, list, detect
+        proxy-tools.ts                # 10 tools: chat, health, shield_check, compress, analyze_text, segment, list_models, estimate_cost, embed, cache_stats
+        ast-tools.ts                  # 3 tools: ast_analyze, ast_analyze_batch, ast_detect_language (aiyoucli-proxy)
+        semantic-tools.ts             # 5 tools: route, route_hybrid, route_enhanced, embed, stats (aiyoucli-proxy)
+        models-tools.ts               # 2 tools: list, optimize (GGUF model management + Unsloth recommendations)
 
     commands/
-      index.ts                        # 21 CLI commands — thin wrappers calling MCP tools
+      index.ts                        # CLI commands — thin wrappers calling MCP tools
 
     statusline/
       generator.ts                    # Statusline renderer + standalone CJS script generator
@@ -146,18 +171,22 @@ aiyoucli/
       rate-limiter.ts                 # Token bucket
       error-handler.ts                # Structured error handling with codes + exit codes
 
+  models/
+    embed-server.py                   # FastAPI ONNX embedding server (port 8001, all-MiniLM-L6-v2, 384-dim)
+    all-MiniLM-L6-v2/                 # ONNX model files (config.json, model.onnx, model.safetensors, tokenizer.json)
+
   __tests__/
     napi-smoke.ts                     # Vector DB smoke test
     napi-phase3-smoke.ts              # SONA + Attention + Graph tests (13 tests)
     napi-phase4-smoke.ts              # Routing + Analysis tests (13 tests)
 ```
 
-## CLI Commands (21)
+## CLI Commands (23)
 
 | Command | Subcommands | What it does |
 |---------|-------------|--------------|
 | `init` | | Generate AGENTS.md, CLAUDE.md, GEMINI.md, settings, statusline |
-| `agent` | spawn, list, status, stop | Agent lifecycle management |
+| `agent` | spawn, list, status, stop, record, metrics | Agent lifecycle management |
 | `swarm` | init, status, stop | Multi-agent swarm coordination |
 | `memory` | init, store, search, list, stats, delete | Vector memory via Rust NAPI |
 | `mcp` | start, status, tools | MCP server management |
@@ -177,14 +206,77 @@ aiyoucli/
 | `update` | | Self-update (placeholder) |
 | `performance` | benchmark | Vector search benchmarking |
 | `statusline` | | Rich status dashboard (supports --json, --generate) |
+| `models` | list, optimize | GGUF model management + Unsloth Dynamic v2.0 recommendations |
+| `skills` | sync, list, detect | Skill discovery and TOON distillation |
+| `rd` | init, search, strategies, status, report, doc | Deep research (strategies, search, documents, knowledge graph) |
 
-## MCP Tools (41)
+## MCP Tools (84)
 
-The CLI exposes 41 tools via MCP protocol (JSON-RPC over stdio). Claude Code, Gemini CLI, or any MCP client can call these tools.
+The CLI exposes 84 tools via MCP protocol (JSON-RPC over stdio). Claude Code, Gemini CLI, or any MCP client can call these tools.
 
 To see all tools: `aiyoucli mcp tools`
 
 Tool dispatch includes production hardening: circuit breaker (threshold=10, reset=15s) and retry with exponential backoff (1 retry, 500ms base).
+
+### Phase 4 — AST Analyzer + Semantic Router (aiyoucli-proxy)
+
+| Tool | Description |
+|------|-------------|
+| `ast_analyze` | Multi-language AST analysis (JS, TS, Python, Rust, Go, Java) |
+| `ast_analyze_batch` | Batch analyze multiple source files |
+| `ast_detect_language` | Detect language by file extension |
+| `semantic_route` | Route task to agent (keyword matching, 8 agents) |
+| `semantic_route_hybrid` | Route task with custom embedding scores |
+| `semantic_route_enhanced` | Auto hybrid route (keyword + gateway embedding) |
+| `semantic_embed` | Get 8-dim keyword embedding vector |
+| `semantic_stats` | Router config + agent statistics |
+
+AST TypeScript bridge: `src/napi/proxy.ts` — adds `analyzeCode`, `analyzeCodeBatch`, `detectLanguage`, `semanticRoute`, `semanticRouteHybrid`, `semanticEmbed`, `semanticStats` to `ProxyEngineHandle`.
+
+Semantic enhancement: `src/semantic/agent-profiles.ts` — 8 agent profiles with keyword scoring, cosine similarity, hybrid score computation using gateway embeddings with keyword fallback.
+
+### Phase 5 — Deep Research (aiyoucli-rd)
+
+| Tool | Description |
+|------|-------------|
+| `rd_init` | Initialize a deep research session with strategy and config |
+| `rd_search` | Web search across engines (searxng, arxiv, pubmed, semantic-scholar, wikipedia) |
+| `rd_document_process` | Process PDF/DOCX/image documents via bgustdown/bgustreadimg pipeline |
+| `rd_strategies` | List available research strategies with descriptions |
+| `rd_status` | Check research session status |
+| `rd_knowledge_graph` | View knowledge graph nodes and connections for a session |
+| `rd_citations` | Generate citations from session sources (APA/MLA/Chicago/BibTeX) |
+| `rd_report` | Generate markdown/json research report from completed session |
+
+TypeScript bridge: `src/rd/engine.ts` — `ResearchEngine` class with session lifecycle, strategy management, `getResearchEngine()` singleton.
+
+Rust NAPI crate: `crates/aiyoucli-rd/src/lib.rs` — Fast NAPI functions for session creation, strategy listing, document processing (builds independently, no aiyouvector deps).
+
+## ONNX Embedding Server
+
+The local embedding server runs at `http://127.0.0.1:8001/v1/embeddings` using ONNX Runtime with all-MiniLM-L6-v2 (384-dim). It provides fast, local text embeddings without external API calls.
+
+```bash
+source /tmp/minio-venv/bin/activate && setsid python3 models/embed-server.py
+```
+
+Dependencies: fastapi, uvicorn, onnxruntime, numpy, minio, tokenizers, sentence-transformers (no-deps). The model files are stored in `models/all-MiniLM-L6-v2/` (config.json, model.onnx, model.safetensors, tokenizer.json).
+
+## aiyoucli-proxy NAPI Binary
+
+The `aiyoucli-proxy` crate builds independently from aiyouvector — no external Rust dependencies beyond napi, reqwest, tokio, regex. It provides:
+
+| Module | Key functions |
+|--------|---------------|
+| `lib.rs` | Gateway routing, compression, shield, embedding, cache |
+| `napi.rs` | NAPI-RS exports (ProxyEngine) |
+| `ast.rs` | Multi-language AST: function/class/import extraction (JS/TS/Python/Rust/Go/Java) |
+| `embeddings.rs` | Embedding client targeting the local ONNX server (port 8001) |
+| `semantic.rs` | Semantic router: keyword matching + embedding hybrid |
+
+Build: `cargo build --release -p aiyoucli-proxy && cp target/release/libaiyoucli_proxy.so aiyoucli-proxy.linux-x64-gnu.node`
+
+Build: `cargo build --release -p aiyoucli-rd && cp target/release/libaiyoucli_rd.so aiyoucli-rd.linux-x64-gnu.node`
 
 ## NAPI Rust Bindings
 
@@ -208,17 +300,17 @@ The statusline shows an honest dashboard — only data that actually exists:
 ```
 # Minimal (no active state)
 aiyoucli  Francisco August  |  main +3~1  |  Opus 4.6 (1M context)  |  12m30s
-  41 mcp tools available
+  84 mcp tools available
 
 # With activity
 aiyoucli  Francisco August  |  main +3~1  |  Opus 4.6 (1M context)  |  12m30s
   agents 2/8  |  tasks 1 running  3 done  2 queued  |  vectors 150
-  41 mcp tools available
+  84 mcp tools available
 
 # With Claude Code stdin data (context %, cost)
 aiyoucli  Francisco August  |  main +3~1  |  Opus 4.6 (1M context)  |  213m56s  |  40% ctx  |  $48.29
   agents 2/8  |  tasks 1 running  3 done  2 queued
-  41 mcp tools available
+  84 mcp tools available
 ```
 
 Palette: indigo, teal, warm peach, soft green, soft yellow, soft red.
@@ -250,17 +342,23 @@ State is stored in `.aiyoucli/` in the project root:
   sessions/*.json         # Session files
   helpers/statusline.cjs  # Standalone statusline script
   config.json             # Project config (optional)
+  q-table.json            # Q-Learning persistence (auto-saved)
+  metrics/                # Metrics snapshots
+  skills/                 # TOON-distilled skill files
 ```
 
 ## Pending Work
 
 | Priority | Feature | Notes |
 |----------|---------|-------|
+| High | Deep research module (aiyoucli-rd) | Orchestration, web search, document processing, knowledge graph |
 | High | npm packaging + GitHub Actions CI | Cross-platform NAPI builds for 5 targets |
 | High | `update` command | Self-update mechanism |
-| High | AST analyzer (tree-sitter multi-language) | Currently uses regex-based complexity |
-| High | Semantic router (embeddings) | Currently keyword-based heuristic |
-| Medium | HNSW index in memory tools | Currently uses flat index |
-| Medium | Q-table persistence to disk | Currently in-memory only |
+| Done | AST analyzer (regex + language-specific parsers) | Multi-language function/class/import extraction |
+| Done | Semantic router (keyword + embedding hybrid) | 8 agent profiles with gateway embedding hybrid |
+| Done | HNSW index in memory tools | HNSW enabled by default (open + in-memory) |
+| Done | Q-table persistence to disk | Auto-save to .aiyoucli/q-table.json |
+| Done | ONNX embedding server | Local all-MiniLM-L6-v2 on port 8001 |
+| Done | aiyoucli-proxy NAPI binary | Standalone build, no aiyouvector deps |
 | Low | Plugin system | Deferred |
 | Low | IPFS pattern sharing | Deferred |

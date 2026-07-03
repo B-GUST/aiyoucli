@@ -68,6 +68,27 @@ export interface Config {
   swarm: SwarmConfig;
   mcp: MCPConfig;
   cli: CLIPreferences;
+  llm?: LLMConfig;
+  hooks?: HooksConfig;
+}
+
+export interface LLMConfig {
+  default_provider?: string;
+  base_url?: string;
+  active?: string;
+  local?: {
+    base_url?: string;
+    model?: string;
+  };
+  external?: {
+    base_url?: string;
+    model?: string;
+  };
+}
+
+export interface HooksConfig {
+  pre_task?: string;
+  post_task?: string;
 }
 
 export interface MemoryConfig {

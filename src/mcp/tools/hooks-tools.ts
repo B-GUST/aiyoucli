@@ -6,8 +6,10 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import type { MCPTool, MCPToolResult } from "../../types.js";
 import { createRoutingEngine, type RoutingEngine } from "../../napi/index.js";
+import { loadConfig } from "../../config.js";
 
 const Q_TABLE_DIR = join(process.cwd(), ".aiyoucli");
 const Q_TABLE_PATH = join(Q_TABLE_DIR, "q-table.json");
@@ -56,6 +58,17 @@ export const hooksTools: MCPTool[] = [
       required: ["description"],
     },
     handler: async (input) => {
+      // Execute configured pre_task shell command if present
+      const config = loadConfig();
+      if (config.hooks?.pre_task) {
+        try {
+          execSync(config.hooks.pre_task, { stdio: "inherit" });
+        } catch (err) {
+          // Log or handle error but proceed
+          console.error(`Error running pre_task hook: ${err}`);
+        }
+      }
+
       const r = await getRouter();
       const result = r.route(input.description as string);
       return json({
@@ -87,6 +100,17 @@ export const hooksTools: MCPTool[] = [
         reward,
       );
       await persistQTable();
+
+      // Execute configured post_task shell command if present
+      const config = loadConfig();
+      if (config.hooks?.post_task) {
+        try {
+          execSync(config.hooks.post_task, { stdio: "inherit" });
+        } catch (err) {
+          console.error(`Error running post_task hook: ${err}`);
+        }
+      }
+
       return text(`Recorded ${(input.success as boolean) ? "success" : "failure"} for ${input.agent} (Q-table saved)`);
     },
   },
