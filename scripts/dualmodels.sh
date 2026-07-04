@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 MODE=${1:-coder}
-MODELS_DIR="/home/august/.aiyoucli/models"
+MODELS_DIR="$HOME/.aiyoucli/models"
 
 if [ "$MODE" = "research" ]; then
   MODEL_2="Llama-3.2-3B-Instruct-Q4_K_M.gguf"

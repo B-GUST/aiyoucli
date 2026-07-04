@@ -302,6 +302,8 @@ The proxy is designed to run alongside any llama.cpp-compatible server. It adds:
 - **Segmentation**: Text splitting by chunks or sentences with overlap
 - **Embeddings**: Integration with local ONNX embedding server (port 8001)
 
+For a detailed guide on setting up local/hybrid models, Wake-on-Request routing, VRAM management, and configuring swarms, see [Local and Hybrid Models Configuration](docs/local-models.md).
+
 ### Run as MCP Server
 
 aiyoucli can run as an MCP server for Claude Code, Cursor, or any MCP-compatible client:

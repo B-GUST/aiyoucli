@@ -1,6 +1,6 @@
 # CLI Reference
 
-[Home](../README.md) | [Getting Started](getting-started.md) | **CLI Reference** | [MCP Tools](mcp-tools.md) | [Architecture](architecture.md) | [Configuration](configuration.md)
+[Home](../README.md) | [Getting Started](getting-started.md) | **CLI Reference** | [MCP Tools](mcp-tools.md) | [Architecture](architecture.md) | [Configuration](configuration.md) | [Local Models](local-models.md)
 
 ---
 

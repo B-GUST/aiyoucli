@@ -1,6 +1,6 @@
 # Architecture
 
-[Home](../README.md) | [Getting Started](getting-started.md) | [CLI Reference](cli-reference.md) | [MCP Tools](mcp-tools.md) | **Architecture** | [Configuration](configuration.md)
+[Home](../README.md) | [Getting Started](getting-started.md) | [CLI Reference](cli-reference.md) | [MCP Tools](mcp-tools.md) | **Architecture** | [Configuration](configuration.md) | [Local Models](local-models.md)
 
 ---
 
