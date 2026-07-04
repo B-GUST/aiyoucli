@@ -70,7 +70,14 @@ export interface Config {
   cli: CLIPreferences;
   llm?: LLMConfig;
   hooks?: HooksConfig;
+  routing?: RoutingConfig;
 }
+
+export interface RoutingConfig {
+  default_mode?: string;
+  modes?: Record<string, Record<string, { ports: number[]; models: string[] }>>;
+}
+
 
 export interface LLMConfig {
   default_provider?: string;
