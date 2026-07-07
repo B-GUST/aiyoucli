@@ -73,6 +73,9 @@ function mergeConfig(partial: Partial<Config>): Config {
     swarm: { ...DEFAULT_CONFIG.swarm, ...partial.swarm },
     mcp: { ...DEFAULT_CONFIG.mcp, ...partial.mcp },
     cli: { ...DEFAULT_CONFIG.cli, ...partial.cli },
+    llm: partial.llm ? { ...partial.llm } : undefined,
+    hooks: partial.hooks ? { ...partial.hooks } : undefined,
+    routing: partial.routing ? { ...partial.routing } : undefined,
   };
   return applyEnvOverrides(merged);
 }

@@ -13,6 +13,7 @@ import { generateAgentsMd } from "../init/agentsmd-generator.js";
 import { generateSettings } from "../init/settings-generator.js";
 import { interactiveInit } from "../init/interactive.js";
 import { renderStatusline, generateStatuslineScript } from "../statusline/generator.js";
+import { startInteractive, stopInteractive, showStatus } from "../models/manager.js";
 import type { Command, MCPToolResult } from "../types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -113,6 +114,15 @@ const initCommand: Command = {
 const agentCommand: Command = {
   name: "agent",
   description: "Agent lifecycle (spawn, list, stop, record, metrics)",
+  examples: [
+    { command: "aiyoucli agent spawn --type coder --name worker-1", description: "Spawn a coder agent with a custom name" },
+    { command: "aiyoucli agent spawn --type architect --model opus", description: "Spawn an architect agent using opus-tier model" },
+    { command: "aiyoucli agent spawn --type researcher --model haiku", description: "Spawn a lightweight researcher agent" },
+    { command: "aiyoucli agent list", description: "List all active agents" },
+    { command: "aiyoucli agent status --id agent_xxxx", description: "Check status and metrics of a specific agent" },
+    { command: "aiyoucli agent stop --id agent_xxxx", description: "Stop an agent by ID" },
+    { command: "aiyoucli agent record --id agent_xxxx --success true --duration-ms 15000", description: "Record a successful task outcome" },
+  ],
   subcommands: [
     {
       name: "spawn",
@@ -207,6 +217,13 @@ const agentCommand: Command = {
 const swarmCommand: Command = {
   name: "swarm",
   description: "Swarm coordination (init, status, stop)",
+  examples: [
+    { command: "aiyoucli swarm init --topology hierarchical --maxAgents 5 --strategy specialized", description: "Initialize a hierarchical swarm with 5 specialized agents" },
+    { command: "aiyoucli swarm init --topology mesh --maxAgents 8 --strategy balanced", description: "Initialize a mesh topology swarm for balanced load distribution" },
+    { command: "aiyoucli swarm init --topology star --strategy adaptive", description: "Initialize a star-topology swarm with adaptive agent spawning" },
+    { command: "aiyoucli swarm status", description: "Check swarm state and connected agents" },
+    { command: "aiyoucli swarm stop", description: "Stop the active swarm" },
+  ],
   subcommands: [
     {
       name: "init",
@@ -909,7 +926,225 @@ const statuslineCommand: Command = {
   },
 };
 
-// ── 22. skills ────────────────────────────────────────────────────
+// ── 22. models ────────────────────────────────────────────────────
+
+const modelsCommand: Command = {
+  name: "models",
+  description: "Manage local GGUF models (list, optimize, start, stop, status)",
+  examples: [
+    { command: "aiyoucli models list --path /home/user/models/", description: "List all GGUF files in a directory with quantization details" },
+    { command: "aiyoucli models optimize --model llama-3.1-8b", description: "Get Unsloth Dynamic v2.0 upgrade recommendation for a model" },
+    { command: "aiyoucli models start", description: "Interactive assistant to select work mode and launch llama-server" },
+    { command: "aiyoucli models stop", description: "Stop all running llama-server instances" },
+    { command: "aiyoucli models status", description: "Show status of active models" },
+    { command: "aiyoucli models list", description: "Scan default .aiyoucli/models/ directory" },
+  ],
+  subcommands: [
+    {
+      name: "list",
+      description: "Scan for GGUF models and show Unsloth Dynamic v2.0 upgrade recommendations",
+      options: [
+        { name: "path", short: "p", description: "Directory to scan (default: .aiyoucli/models/)", type: "string" },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const result = await callTool("models_list", {
+          path: ctx.flags.path || ctx.flags.p,
+        });
+        const raw = result.content[0]?.text ?? "{}";
+        try {
+          const data = JSON.parse(raw);
+          output.log(color.bold("\naiyoucli models\n"));
+          output.log(`  Scanned: ${data.scanned_path}`);
+          if (!data.exists) {
+            output.log(color.yellow(`  ${data.message}`));
+            output.log("");
+            return;
+          }
+          output.log(`  Models:  ${data.total_models}  Total: ${data.total_size_gb} GB\n`);
+          for (const m of data.models) {
+            const badge = m.quantization;
+            const size = m.size_gb.toFixed(2).padStart(7) + " GB";
+            output.log(`  ${color.cyan(m.file)}`);
+            output.log(`    Quant: ${badge}  Size: ${size}`);
+            if (m.unsloth_upgrade) {
+              output.log(`    ${color.green("✦ Unsloth Dynamic v2.0 available:")}`);
+              output.log(`      Repo: ${m.unsloth_upgrade.repo}`);
+              output.log(`      ${m.unsloth_upgrade.note}`);
+            } else {
+              output.log(`    ${color.yellow("○ No Unsloth Dynamic v2.0 known for this model")}`);
+            }
+            output.log("");
+          }
+        } catch {
+          output.log(raw);
+        }
+      },
+    },
+    {
+      name: "optimize",
+      description: "Get Unsloth Dynamic v2.0 recommendation for a specific model",
+      options: [
+        { name: "model", short: "m", description: "Model name (e.g. llama-3.1-8b)", type: "string", required: true },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const model = ctx.flags.model || ctx.flags.m || ctx.args.join(" ");
+        if (!model) { output.error("Model name required: --model <name>"); return; }
+        const result = await callTool("models_optimize", { model });
+        printJson(result);
+      },
+    },
+    {
+      name: "start",
+      description: "Interactive assistant to select work mode, models, download from MinIO if needed, validate VRAM, and launch llama-server in background",
+      action: async () => {
+        const result = await startInteractive();
+        if (!result.ok) {
+          output.error(result.message);
+        } else {
+          output.log(color.green(result.message));
+        }
+      },
+    },
+    {
+      name: "stop",
+      description: "Stop all running llama-server instances",
+      action: async () => {
+        const result = stopInteractive();
+        if (result.ok) {
+          output.log(color.green(result.message));
+        } else {
+          output.error(result.message);
+        }
+      },
+    },
+    {
+      name: "status",
+      description: "Show status of active models",
+      action: async () => {
+        const status = showStatus();
+        output.log(status);
+      },
+    },
+  ],
+};
+
+// ── 23. rd (deep research) ──────────────────────────────────────────
+
+const rdCommand: Command = {
+  name: "rd",
+  description: "Deep research (strategies, search, documents, knowledge graph)",
+  examples: [
+    { command: "aiyoucli rd init --query 'Rust zero-copy deserialization patterns' --strategy langgraph-agent", description: "Start autonomous deep research on a topic" },
+    { command: "aiyoucli rd search --query 'HNSW vs IVF index performance' --engine arxiv", description: "Search academic papers on arXiv" },
+    { command: "aiyoucli rd strategies", description: "List all available research strategies" },
+    { command: "aiyoucli rd status --session-id rd_xxxx", description: "Check research session progress" },
+    { command: "aiyoucli rd report --session-id rd_xxxx --format markdown", description: "Generate markdown research report" },
+    { command: "aiyoucli rd doc --path paper.pdf --ocr", description: "Queue a scanned PDF for OCR processing" },
+  ],
+  subcommands: [
+    {
+      name: "init",
+      description: "Initialize a deep research session",
+      options: [
+        { name: "query", short: "q", description: "Research query", type: "string", required: true },
+        { name: "strategy", short: "s", description: "Strategy: langgraph-agent, source-based, focused-iteration, quick", type: "string" },
+        { name: "max-iterations", short: "i", description: "Max iterations (default: 50)", type: "number" },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const query = ctx.flags.query || ctx.flags.q || ctx.args.join(" ");
+        if (!query) { output.error("Query required: --query <text>"); return; }
+        const result = await callTool("rd_init", {
+          query,
+          strategy: ctx.flags.strategy || ctx.flags.s,
+          max_iterations: ctx.flags["max-iterations"] || ctx.flags.i,
+        });
+        printJson(result);
+      },
+    },
+    {
+      name: "search",
+      description: "Search the web for research sources",
+      options: [
+        { name: "query", short: "q", description: "Search query", type: "string", required: true },
+        { name: "engine", short: "e", description: "Engine: searxng, arxiv, pubmed, wikipedia", type: "string" },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const query = ctx.flags.query || ctx.flags.q || ctx.args.join(" ");
+        if (!query) { output.error("Query required: --query <text>"); return; }
+        const result = await callTool("rd_search", {
+          query,
+          engine: ctx.flags.engine || ctx.flags.e,
+        });
+        printJson(result);
+      },
+    },
+    {
+      name: "strategies",
+      description: "List available research strategies",
+      action: async () => {
+        ensureTools();
+        const result = await callTool("rd_strategies", {});
+        printJson(result);
+      },
+    },
+    {
+      name: "status",
+      description: "Check session status",
+      options: [
+        { name: "session-id", short: "s", description: "Session ID", type: "string", required: true },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const id = ctx.flags["session-id"] || ctx.flags.s || ctx.args[0];
+        if (!id) { output.error("Session ID required: --session-id <id>"); return; }
+        const result = await callTool("rd_status", { session_id: id });
+        printJson(result);
+      },
+    },
+    {
+      name: "report",
+      description: "Generate research report from completed session",
+      options: [
+        { name: "session-id", short: "s", description: "Session ID", type: "string", required: true },
+        { name: "format", short: "f", description: "Format: markdown, json, text", type: "string" },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const id = ctx.flags["session-id"] || ctx.flags.s || ctx.args[0];
+        if (!id) { output.error("Session ID required: --session-id <id>"); return; }
+        const result = await callTool("rd_report", {
+          session_id: id,
+          format: ctx.flags.format || ctx.flags.f,
+        });
+        printResult(result);
+      },
+    },
+    {
+      name: "doc",
+      description: "Queue a document for processing (bgustdown/bgustreadimg)",
+      options: [
+        { name: "path", short: "p", description: "Document file path", type: "string", required: true },
+        { name: "ocr", description: "Enable OCR for scanned documents", type: "boolean" },
+      ],
+      action: async (ctx) => {
+        ensureTools();
+        const path = ctx.flags.path || ctx.flags.p || ctx.args[0];
+        if (!path) { output.error("Path required: --path <file>"); return; }
+        const result = await callTool("rd_document_process", {
+          path,
+          ocr: ctx.flags.ocr ?? false,
+        });
+        printJson(result);
+      },
+    },
+  ],
+};
+
+// ── 24. skills ────────────────────────────────────────────────────
 
 const skillsCommand: Command = {
   name: "skills",
@@ -969,5 +1204,7 @@ export const commands: Command[] = [
   updateCommand,
   performanceCommand,
   statuslineCommand,
+  modelsCommand,
+  rdCommand,
   skillsCommand,
 ];

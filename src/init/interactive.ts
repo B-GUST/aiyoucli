@@ -12,7 +12,7 @@ import { output, color } from "../output.js";
 
 // ── Simple UI helpers (zero deps) ────────────────────────────────
 
-function ask(question: string): Promise<string> {
+export function ask(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise((resolve) => {
     rl.question(question, (answer) => {
@@ -22,7 +22,7 @@ function ask(question: string): Promise<string> {
   });
 }
 
-async function confirm(question: string, defaultYes = true): Promise<boolean> {
+export async function confirm(question: string, defaultYes = true): Promise<boolean> {
   const hint = defaultYes ? "[Y/n]" : "[y/N]";
   const answer = await ask(`${question} ${hint} `);
   if (answer === "") return defaultYes;
