@@ -1,10 +1,14 @@
 /**
- * Generates tool-specific configuration files:
- * - .mcp.json                (MCP server config for Claude Code)
- * - .claude/settings.json    (statusLine hook for Claude Code)
- * - CLAUDE.md                (pointer to AGENTS.md)
- * - GEMINI.md                (pointer to AGENTS.md + Gemini-specific config)
- * - .aiyoucli/helpers/statusline.cjs (standalone statusline script)
+ * Generates tool-specific configuration files.
+ *
+ * Supported targets:
+ *   - claude:   .mcp.json, .claude/settings.json, CLAUDE.md
+ *   - gemini:   GEMINI.md
+ *   - opencode: opencode.json, OPENCODE.md
+ *
+ * Common to all:
+ *   - .aiyoucli/helpers/statusline.cjs
+ *   - .aiyoucli/agents.dsi.toon (distilled AGENTS.md)
  */
 
 import { writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
@@ -13,10 +17,16 @@ import { execSync } from "node:child_process";
 import { generateStatuslineScript } from "../statusline/generator.js";
 import { distillMarkdown } from "../napi/index.js";
 
+// ── Types ───────────────────────────────────────────────────────
+
+export type ToolTarget = "claude" | "gemini" | "opencode";
+
 interface SettingsResult {
   path: string;
   created: boolean;
 }
+
+// ── Helpers ─────────────────────────────────────────────────────
 
 function detectProjectName(projectRoot: string): string {
   const pkgPath = join(projectRoot, "package.json");
@@ -48,7 +58,7 @@ function writeIfNotExists(filePath: string, content: string): SettingsResult {
   return { path: filePath, created: true };
 }
 
-// ── .mcp.json (MCP server for Claude Code) ─────────────────────
+// ── .mcp.json (shared — used by Claude Code and OpenCode) ───────
 
 function buildMcpJson(): object {
   return {
@@ -62,7 +72,7 @@ function buildMcpJson(): object {
   };
 }
 
-// ── .claude/settings.json (statusLine hook) ────────────────────
+// ── Claude Code ─────────────────────────────────────────────────
 
 function buildClaudeSettings(): object {
   return {
@@ -72,8 +82,6 @@ function buildClaudeSettings(): object {
     },
   };
 }
-
-// ── CLAUDE.md ──────────────────────────────────────────────────
 
 function buildClaudeMd(name: string, author: { name: string; email: string }): string {
   return `@.aiyoucli/agents.dsi.toon
@@ -85,7 +93,34 @@ Test: npm test
 `;
 }
 
-// ── GEMINI.md ──────────────────────────────────────────────────
+function generateClaude(projectRoot: string, name: string, author: { name: string; email: string }): string[] {
+  const paths: string[] = [];
+
+  // .mcp.json
+  const r0 = writeIfNotExists(
+    join(projectRoot, ".mcp.json"),
+    JSON.stringify(buildMcpJson(), null, 2) + "\n"
+  );
+  if (r0.created) paths.push(r0.path);
+
+  // .claude/settings.json
+  const r1 = writeIfNotExists(
+    join(projectRoot, ".claude", "settings.json"),
+    JSON.stringify(buildClaudeSettings(), null, 2) + "\n"
+  );
+  if (r1.created) paths.push(r1.path);
+
+  // CLAUDE.md
+  const r2 = writeIfNotExists(
+    join(projectRoot, "CLAUDE.md"),
+    buildClaudeMd(name, author)
+  );
+  if (r2.created) paths.push(r2.path);
+
+  return paths;
+}
+
+// ── Gemini CLI ──────────────────────────────────────────────────
 
 function buildGeminiMd(name: string, author: { name: string; email: string }): string {
   return `See .aiyoucli/agents.dsi.toon for project instructions (dense format).
@@ -96,53 +131,73 @@ Status: aiyoucli statusline
 `;
 }
 
-// ── Main ────────────────────────────────────────────────────────
-
-/**
- * Generate tool-specific configuration files.
- * Supports: Claude Code, Gemini CLI.
- * Will not overwrite existing files.
- *
- * @returns Array of absolute paths to generated files.
- */
-export async function generateSettings(projectRoot: string): Promise<string[]> {
-  const name = detectProjectName(projectRoot);
-  const author = detectGitAuthor();
+function generateGemini(projectRoot: string, name: string, author: { name: string; email: string }): string[] {
   const paths: string[] = [];
 
-  // 1. .mcp.json (MCP server for Claude Code)
   const r0 = writeIfNotExists(
-    join(projectRoot, ".mcp.json"),
-    JSON.stringify(buildMcpJson(), null, 2) + "\n"
-  );
-  if (r0.created) paths.push(r0.path);
-
-  // 2. .claude/settings.json (statusLine hook)
-  const r1 = writeIfNotExists(
-    join(projectRoot, ".claude", "settings.json"),
-    JSON.stringify(buildClaudeSettings(), null, 2) + "\n"
-  );
-  if (r1.created) paths.push(r1.path);
-
-  // 3. CLAUDE.md
-  const r2 = writeIfNotExists(
-    join(projectRoot, "CLAUDE.md"),
-    buildClaudeMd(name, author)
-  );
-  if (r2.created) paths.push(r2.path);
-
-  // 4. GEMINI.md
-  const r3 = writeIfNotExists(
     join(projectRoot, "GEMINI.md"),
     buildGeminiMd(name, author)
   );
-  if (r3.created) paths.push(r3.path);
+  if (r0.created) paths.push(r0.path);
 
-  // 5. Statusline script
+  return paths;
+}
+
+// ── OpenCode ────────────────────────────────────────────────────
+
+function buildOpenCodeJson(): object {
+  return {
+    $schema: "https://opencode.ai/config.json",
+    mcp: {
+      aiyoucli: {
+        command: "aiyoucli-mcp",
+        args: [],
+      },
+    },
+    instructions: ["AGENTS.md"],
+  };
+}
+
+function buildOpenCodeMd(name: string, author: { name: string; email: string }): string {
+  return `See AGENTS.md for project instructions.
+
+Commits: ${author.name} <${author.email}>
+MCP: aiyoucli-mcp (configured in opencode.json)
+Status: aiyoucli statusline
+Tools: 84 MCP tools via aiyoucli-mcp
+`;
+}
+
+function generateOpenCode(projectRoot: string, name: string, author: { name: string; email: string }): string[] {
+  const paths: string[] = [];
+
+  // opencode.json
+  const r0 = writeIfNotExists(
+    join(projectRoot, "opencode.json"),
+    JSON.stringify(buildOpenCodeJson(), null, 2) + "\n"
+  );
+  if (r0.created) paths.push(r0.path);
+
+  // OPENCODE.md
+  const r1 = writeIfNotExists(
+    join(projectRoot, "OPENCODE.md"),
+    buildOpenCodeMd(name, author)
+  );
+  if (r1.created) paths.push(r1.path);
+
+  return paths;
+}
+
+// ── Common (all targets) ────────────────────────────────────────
+
+function generateCommon(projectRoot: string): string[] {
+  const paths: string[] = [];
+
+  // Statusline script
   const statuslinePath = generateStatuslineScript(projectRoot);
   paths.push(statuslinePath);
 
-  // 6. DSI TOON — distill AGENTS.md if it exists
+  // DSI TOON — distill AGENTS.md if it exists
   const agentsMdPath = join(projectRoot, "AGENTS.md");
   if (existsSync(agentsMdPath)) {
     try {
@@ -158,4 +213,61 @@ export async function generateSettings(projectRoot: string): Promise<string[]> {
   }
 
   return paths;
+}
+
+// ── Main ────────────────────────────────────────────────────────
+
+/**
+ * Generate tool-specific configuration files for selected targets.
+ *
+ * @param projectRoot  Root directory of the project.
+ * @param targets      Which tools to configure. Defaults to all.
+ * @returns Array of absolute paths to generated files.
+ */
+export async function generateSettings(
+  projectRoot: string,
+  targets?: ToolTarget[]
+): Promise<string[]> {
+  const effectiveTargets: ToolTarget[] = targets ?? ["claude", "gemini", "opencode"];
+  const name = detectProjectName(projectRoot);
+  const author = detectGitAuthor();
+  const paths: string[] = [];
+
+  // Generate per-target configs
+  for (const target of effectiveTargets) {
+    switch (target) {
+      case "claude":
+        paths.push(...generateClaude(projectRoot, name, author));
+        break;
+      case "gemini":
+        paths.push(...generateGemini(projectRoot, name, author));
+        break;
+      case "opencode":
+        paths.push(...generateOpenCode(projectRoot, name, author));
+        break;
+    }
+  }
+
+  // Common files (statusline, TOON distillation)
+  paths.push(...generateCommon(projectRoot));
+
+  return paths;
+}
+
+/**
+ * Parse a comma-separated tool string into ToolTarget[].
+ * Accepts: "claude", "gemini", "opencode", "all", "claude,opencode", etc.
+ * Returns undefined for "all" (meaning all targets).
+ */
+export function parseToolTargets(input: string | undefined): ToolTarget[] | undefined {
+  if (!input || input === "all") return undefined;
+
+  const valid = new Set<string>(["claude", "gemini", "opencode"]);
+  const parsed = input
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter((s) => valid.has(s));
+
+  if (parsed.length === 0) return undefined;
+  return parsed as ToolTarget[];
 }

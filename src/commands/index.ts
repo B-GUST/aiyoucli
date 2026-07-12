@@ -10,10 +10,11 @@ import { output, color } from "../output.js";
 import { registerAllTools } from "../mcp/tools/index.js";
 import { startMCPServer } from "../mcp/server.js";
 import { generateAgentsMd } from "../init/agentsmd-generator.js";
-import { generateSettings } from "../init/settings-generator.js";
+import { generateSettings, parseToolTargets, type ToolTarget } from "../init/settings-generator.js";
 import { interactiveInit } from "../init/interactive.js";
 import { renderStatusline, generateStatuslineScript } from "../statusline/generator.js";
 import { startInteractive, stopInteractive, showStatus } from "../models/manager.js";
+import { ask } from "../init/interactive.js";
 import type { Command, MCPToolResult } from "../types.js";
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -53,20 +54,73 @@ function printJson(result: MCPToolResult): void {
 
 // ── 1. init ────────────────────────────────────────────────────────
 
+const TOOL_LABELS: Record<ToolTarget, string> = {
+  claude: "Claude Code",
+  gemini: "Gemini CLI",
+  opencode: "OpenCode",
+};
+
+async function selectTargetsInteractively(): Promise<ToolTarget[]> {
+  console.log(`\n${color.bold("Select tools to configure:")}\n`);
+  console.log(`  ${color.cyan("1")}  Claude Code`);
+  console.log(`  ${color.cyan("2")}  Gemini CLI`);
+  console.log(`  ${color.cyan("3")}  OpenCode`);
+  console.log(`  ${color.cyan("4")}  ${color.bold("All")}\n`);
+
+  const answer = await ask(`  Enter numbers (e.g. 1,3) or 4 for all: `);
+
+  if (answer === "4" || answer === "") {
+    return ["claude", "gemini", "opencode"];
+  }
+
+  const map: Record<string, ToolTarget> = { "1": "claude", "2": "gemini", "3": "opencode" };
+  const selected = answer
+    .split(",")
+    .map((s) => s.trim())
+    .map((s) => map[s])
+    .filter((t): t is ToolTarget => !!t);
+
+  return selected.length > 0 ? selected : ["claude", "gemini", "opencode"];
+}
+
 const initCommand: Command = {
   name: "init",
   description: "Initialize project (AGENTS.md, settings, skills)",
   options: [
     { name: "force", short: "f", description: "Overwrite existing files", type: "boolean" },
     { name: "skip-skills", description: "Skip interactive skills setup", type: "boolean" },
+    { name: "tool", short: "t", description: "Tools to configure: claude, gemini, opencode, all (default: all)", type: "string" },
+  ],
+  examples: [
+    { command: "aiyoucli init", description: "Initialize with interactive tool selection" },
+    { command: "aiyoucli init --tool opencode", description: "Initialize for OpenCode only" },
+    { command: "aiyoucli init --tool claude,opencode", description: "Initialize for Claude Code and OpenCode" },
+    { command: "aiyoucli init --tool all", description: "Initialize for all supported tools" },
   ],
   action: async (ctx) => {
     const cwd = ctx.cwd;
+
+    // Resolve which tools to configure
+    let targets: ToolTarget[] | undefined;
+    const toolFlag = (ctx.flags.tool ?? ctx.flags.t) as string | undefined;
+
+    if (toolFlag) {
+      targets = parseToolTargets(toolFlag);
+      if (targets && targets.length > 0) {
+        output.log(`  Configuring: ${targets.map((t) => TOOL_LABELS[t]).join(", ")}\n`);
+      }
+    } else if (ctx.interactive) {
+      targets = await selectTargetsInteractively();
+      output.log(`  Configuring: ${targets.map((t) => TOOL_LABELS[t]).join(", ")}\n`);
+    }
+    // If not interactive and no flag, targets remains undefined = all
+
     const spinner = output.spinner("Initializing project...");
     spinner.start();
 
     const created: string[] = [];
 
+    // 1. Generate AGENTS.md (always)
     try {
       const agentsMdPath = await generateAgentsMd(cwd);
       created.push(agentsMdPath);
@@ -80,8 +134,9 @@ const initCommand: Command = {
       }
     }
 
+    // 2. Generate tool-specific configs
     try {
-      const settingsPaths = await generateSettings(cwd);
+      const settingsPaths = await generateSettings(cwd, targets);
       created.push(...settingsPaths);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -94,7 +149,7 @@ const initCommand: Command = {
       output.log(`  ${color.green("+")} ${path.replace(cwd + "/", "")}`);
     }
 
-    // Interactive skills setup (if terminal is interactive)
+    // 3. Interactive skills setup (if terminal is interactive)
     if (!ctx.flags["skip-skills"] && ctx.interactive) {
       try {
         const skillPaths = await interactiveInit(cwd);

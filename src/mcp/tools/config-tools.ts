@@ -42,7 +42,7 @@ export const configTools: MCPTool[] = [
       type: "object",
       properties: {
         key: { type: "string", description: "Config key path" },
-        value: { description: "New value" },
+        value: { type: "string", description: "New value" },
       },
       required: ["key", "value"],
     },
