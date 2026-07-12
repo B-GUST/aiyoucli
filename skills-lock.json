@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "skills": {
+    "npm-publish": {
+      "source": "b-open-io/prompts",
+      "sourceType": "github",
+      "computedHash": "74074689edec9c204e5c702bcdb856bccc1fabb12efbb6337d8b0c83615d840c"
+    },
+    "security-review": {
+      "source": "getsentry/skills",
+      "sourceType": "github",
+      "computedHash": "cc631e7761e4bb8f844e931e3019e9abf8a36520137480ee60b897314776b0de"
+    }
+  }
+}

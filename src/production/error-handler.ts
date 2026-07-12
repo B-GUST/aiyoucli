@@ -36,7 +36,7 @@ export function handleError(error: unknown): HandledError {
 
   if (error instanceof Error) {
     return {
-      message: "Internal error",
+      message: process.env.NODE_ENV === "production" ? "Internal error" : error.message,
       code: "INTERNAL_ERROR",
       exitCode: 10,
     };
