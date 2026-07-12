@@ -68,6 +68,42 @@ export interface Config {
   swarm: SwarmConfig;
   mcp: MCPConfig;
   cli: CLIPreferences;
+  llm?: LLMConfig;
+  hooks?: HooksConfig;
+  routing?: RoutingConfig;
+}
+
+export interface RoutingConfig {
+  default_mode?: string;
+  modes?: Record<string, Record<string, { ports: number[]; models: string[] }>>;
+}
+
+
+export interface LLMConfig {
+  default_provider?: string;
+  base_url?: string;
+  active?: string;
+  local?: {
+    base_url?: string;
+    model?: string;
+  };
+  external?: {
+    base_url?: string;
+    model?: string;
+  };
+  workMode?: "uni-model" | "dual-model" | "tree-model";
+  models?: {
+    vramLimitMiB?: number;
+    minioUrl?: string;
+    minioAccessKey?: string;
+    minioSecretKey?: string;
+    localModelsPath?: string;
+  };
+}
+
+export interface HooksConfig {
+  pre_task?: string;
+  post_task?: string;
 }
 
 export interface MemoryConfig {

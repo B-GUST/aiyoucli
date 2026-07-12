@@ -6,8 +6,43 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
+import { execSync, exec, spawn } from "node:child_process";
+import net from "node:net";
 import type { MCPTool, MCPToolResult } from "../../types.js";
 import { createRoutingEngine, type RoutingEngine } from "../../napi/index.js";
+import { loadConfig } from "../../config.js";
+import { isPortInUse, stopAll } from "../../models/launcher.js";
+
+function checkPortReachable(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(1000);
+    socket.once("connect", () => {
+      socket.end();
+      resolve(true);
+    });
+    socket.once("error", () => resolve(false));
+    socket.once("timeout", () => resolve(false));
+    socket.connect(port, "127.0.0.1");
+  });
+}
+
+async function waitForPortsReady(ports: number[], timeoutMs = 30000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    let allReady = true;
+    for (const port of ports) {
+      const ready = await checkPortReachable(port);
+      if (!ready) {
+        allReady = false;
+        break;
+      }
+    }
+    if (allReady) return true;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return false;
+}
 
 const Q_TABLE_DIR = join(process.cwd(), ".aiyoucli");
 const Q_TABLE_PATH = join(Q_TABLE_DIR, "q-table.json");
@@ -56,8 +91,67 @@ export const hooksTools: MCPTool[] = [
       required: ["description"],
     },
     handler: async (input) => {
+      // Execute configured pre_task shell command if present
+      const config = loadConfig();
+      if (config.hooks?.pre_task) {
+        try {
+          execSync(config.hooks.pre_task, { stdio: "inherit" });
+        } catch (err) {
+          // Log or handle error but proceed
+          console.error(`Error running pre_task hook: ${err}`);
+        }
+      }
+
       const r = await getRouter();
-      const result = r.route(input.description as string);
+      const taskDescription = input.description as string;
+      const result = r.route(taskDescription);
+
+      // Auto Wake-on-Request local models logic
+      const recommendedTier = result.model_tier; // e.g. unimodel, dualmodels, treemodels
+      const isResearch = /research|investiga|redacta|write|summary|report|analiza|articulo|redacción/i.test(taskDescription);
+      const mode = isResearch ? "research" : "coder";
+
+      const modes = (config as any).routing?.modes;
+      if (modes && modes[mode] && modes[mode][recommendedTier]) {
+        const tierConfig = modes[mode][recommendedTier];
+        const ports = tierConfig.ports || [];
+        
+        let portsActive = true;
+        for (const port of ports) {
+          if (!isPortInUse(port) && !(await checkPortReachable(port))) {
+            portsActive = false;
+            break;
+          }
+        }
+
+        if (!portsActive) {
+          console.log(`[Hooks Pre-Task] Levantando perfiles para modo ${mode} en Tier ${recommendedTier}...`);
+          try {
+            // Detener servidores corriendo para evitar colisiones de VRAM
+            stopAll();
+          } catch {}
+
+          // Lanza el script correspondiente en segundo plano
+          const scriptName = `${recommendedTier}.sh`;
+          const scriptPath = join(config.projectRoot, "scripts", scriptName);
+          
+          try {
+            const child = spawn("bash", [scriptPath, mode], { detached: true, stdio: "ignore" });
+            child.unref();
+            
+            console.log(`[Hooks Pre-Task] Esperando a que los puertos [${ports.join(", ")}] esten listos...`);
+            const ready = await waitForPortsReady(ports);
+            if (ready) {
+              console.log(`[Hooks Pre-Task] Modelos iniciados y listos en modo ${mode}.`);
+            } else {
+              console.warn(`[Hooks Pre-Task] Advertencia: Algunos modelos no respondieron a tiempo.`);
+            }
+          } catch (err) {
+            console.error(`[Hooks Pre-Task] Error al arrancar lanzador: ${err}`);
+          }
+        }
+      }
+
       return json({
         recommended_agent: result.route,
         model_tier: result.model_tier,
@@ -87,6 +181,17 @@ export const hooksTools: MCPTool[] = [
         reward,
       );
       await persistQTable();
+
+      // Execute configured post_task shell command if present
+      const config = loadConfig();
+      if (config.hooks?.post_task) {
+        try {
+          execSync(config.hooks.post_task, { stdio: "inherit" });
+        } catch (err) {
+          console.error(`Error running post_task hook: ${err}`);
+        }
+      }
+
       return text(`Recorded ${(input.success as boolean) ? "success" : "failure"} for ${input.agent} (Q-table saved)`);
     },
   },
