@@ -63,8 +63,8 @@ export const systemTools: MCPTool[] = [
         const { execSync } = await import("node:child_process");
         const gitVersion = execSync("git --version", { encoding: "utf-8" }).trim();
         checks.push({ name: "git", status: "ok", detail: gitVersion });
-      } catch {
-        checks.push({ name: "git", status: "fail" });
+      } catch (e) {
+        checks.push({ name: "git", status: "fail", detail: String(e) });
       }
 
       const allOk = checks.every((c) => c.status === "ok");

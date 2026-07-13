@@ -7,7 +7,7 @@ import type { WorkMode, ModelRole, GpuInfo, ModelEntry, RunningModel, ModelEngin
 import { detectGpuInfo, getModelVram, validateCombination, listLocalModels } from "./vram.js";
 import { checkMinioHealth, listModelsInBucket, downloadModel, getModelsDir } from "./minio.js";
 import { startServer, stopAll, isPortInUse } from "./launcher.js";
-import { updateOpenCodeConfig, setDefaultModel } from "../init/opencode-config.js";
+import { updateOpenCodeConfig, setDefaultModel, setupAbstractOpenCodeConfig } from "../init/opencode-config.js";
 
 const STATE_FILE = join(homedir(), ".aiyoucli", "models-state.json");
 
@@ -223,23 +223,12 @@ export async function startInteractive(
     return { ok: false, running: [], message: "No se pudo iniciar ningun modelo." };
   }
 
-  for (const r of running) {
-    const modelName = cleanModelName(r.assignment.file);
-    const opencodeResult = updateOpenCodeConfig(r.assignment.file, modelName, r.assignment.port);
-    if (opencodeResult.ok) {
-      console.log(`  ${color.green("✓")} ${opencodeResult.message}`);
-    } else {
-      console.log(`  ${color.yellow("⚠")} ${opencodeResult.message}`);
-    }
-  }
-
-  const firstRunning = running[0];
-  if (firstRunning) {
-    const modelName = cleanModelName(firstRunning.assignment.file);
-    const defaultResult = setDefaultModel(modelName);
-    if (defaultResult.ok) {
-      console.log(`  ${color.green("✓")} ${defaultResult.message}`);
-    }
+  // Configurar mapeo abstracto estático de OpenCode para evitar redundancia
+  const opencodeResult = setupAbstractOpenCodeConfig();
+  if (opencodeResult.ok) {
+    console.log(`  ${color.green("✓")} ${opencodeResult.message}`);
+  } else {
+    console.log(`  ${color.yellow("⚠")} ${opencodeResult.message}`);
   }
 
   displayStatus(running);
@@ -292,4 +281,42 @@ export function stopInteractive(): { ok: boolean; message: string } {
     return { ok: true, message: `${msg}. Errores: ${errors.join(", ")}` };
   }
   return { ok: true, message: msg };
+}
+
+export async function wakeUpFromState(): Promise<{ ok: boolean; message: string }> {
+  const state = loadState();
+  if (!state || state.running.length === 0) {
+    return { ok: false, message: "No hay una configuración de modelos guardada. Corre 'aiyoucli models start' primero." };
+  }
+
+  const running: RunningModel[] = [];
+  let updated = false;
+
+  for (const model of state.running) {
+    const port = model.assignment.port;
+    const active = isPortInUse(port);
+    if (!active) {
+      console.log(`  [Wake-on-Request] Levantando ${model.assignment.role} (${model.assignment.file}) en :${port}...`);
+      const result = await startServer(model.assignment);
+      if ("error" in result) {
+        console.error(`  [Wake-on-Request] Error al levantar ${model.assignment.role}: ${result.error}`);
+      } else {
+        running.push(result);
+        updated = true;
+      }
+    } else {
+      running.push(model);
+    }
+  }
+
+  if (updated) {
+    state.running = running;
+    saveState(state);
+  }
+
+  const activeCount = running.length;
+  return { 
+    ok: activeCount > 0, 
+    message: `Modelos activos: ${activeCount}/${state.running.length}` 
+  };
 }

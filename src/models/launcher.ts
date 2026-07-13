@@ -1,6 +1,8 @@
 import { spawn, execSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import http from "node:http";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import type { ChildProcess } from "node:child_process";
 import type { ModelAssignment, RunningModel } from "./types.js";
 
@@ -22,7 +24,7 @@ function getLlamaServerPath(): string {
   }
 
   const commonPaths = [
-    "/home/august/code/llama.cpp/build/bin/llama-server",
+    join(homedir(), "code/llama.cpp/build/bin/llama-server"),
     "/usr/local/bin/llama-server",
     "/usr/bin/llama-server",
     "/opt/llama.cpp/build/bin/llama-server",
@@ -30,7 +32,7 @@ function getLlamaServerPath(): string {
   ];
 
   for (const p of commonPaths) {
-    if (existsSync(p)) {
+    if (p && existsSync(p)) {
       _llamaServerPath = p;
       return p;
     }

@@ -107,47 +107,61 @@ export const hooksTools: MCPTool[] = [
       const result = r.route(taskDescription);
 
       // Auto Wake-on-Request local models logic
-      const recommendedTier = result.model_tier; // e.g. unimodel, dualmodels, treemodels
-      const isResearch = /research|investiga|redacta|write|summary|report|analiza|articulo|redacción/i.test(taskDescription);
-      const mode = isResearch ? "research" : "coder";
-
-      const modes = (config as any).routing?.modes;
-      if (modes && modes[mode] && modes[mode][recommendedTier]) {
-        const tierConfig = modes[mode][recommendedTier];
-        const ports = tierConfig.ports || [];
-        
-        let portsActive = true;
-        for (const port of ports) {
-          if (!isPortInUse(port) && !(await checkPortReachable(port))) {
-            portsActive = false;
-            break;
-          }
+      let customStateRestored = false;
+      try {
+        const { wakeUpFromState } = await import("../../models/manager.js");
+        const res = await wakeUpFromState();
+        if (res.ok) {
+          console.log(`[Hooks Pre-Task] ${res.message}`);
+          customStateRestored = true;
         }
+      } catch (err) {
+        // Ignorar error y seguir con fallback tradicional
+      }
 
-        if (!portsActive) {
-          console.log(`[Hooks Pre-Task] Levantando perfiles para modo ${mode} en Tier ${recommendedTier}...`);
-          try {
-            // Detener servidores corriendo para evitar colisiones de VRAM
-            stopAll();
-          } catch {}
+      if (!customStateRestored) {
+        const recommendedTier = result.model_tier; // e.g. unimodel, dualmodels, treemodels
+        const isResearch = /research|investiga|redacta|write|summary|report|analiza|articulo|redacción/i.test(taskDescription);
+        const mode = isResearch ? "research" : "coder";
 
-          // Lanza el script correspondiente en segundo plano
-          const scriptName = `${recommendedTier}.sh`;
-          const scriptPath = join(config.projectRoot, "scripts", scriptName);
+        const modes = (config as any).routing?.modes;
+        if (modes && modes[mode] && modes[mode][recommendedTier]) {
+          const tierConfig = modes[mode][recommendedTier];
+          const ports = tierConfig.ports || [];
           
-          try {
-            const child = spawn("bash", [scriptPath, mode], { detached: true, stdio: "ignore" });
-            child.unref();
-            
-            console.log(`[Hooks Pre-Task] Esperando a que los puertos [${ports.join(", ")}] esten listos...`);
-            const ready = await waitForPortsReady(ports);
-            if (ready) {
-              console.log(`[Hooks Pre-Task] Modelos iniciados y listos en modo ${mode}.`);
-            } else {
-              console.warn(`[Hooks Pre-Task] Advertencia: Algunos modelos no respondieron a tiempo.`);
+          let portsActive = true;
+          for (const port of ports) {
+            if (!isPortInUse(port) && !(await checkPortReachable(port))) {
+              portsActive = false;
+              break;
             }
-          } catch (err) {
-            console.error(`[Hooks Pre-Task] Error al arrancar lanzador: ${err}`);
+          }
+
+          if (!portsActive) {
+            console.log(`[Hooks Pre-Task] Levantando perfiles para modo ${mode} en Tier ${recommendedTier}...`);
+            try {
+              // Detener servidores corriendo para evitar colisiones de VRAM
+              stopAll();
+            } catch {}
+
+            // Lanza el script correspondiente en segundo plano
+            const scriptName = `${recommendedTier}.sh`;
+            const scriptPath = join(config.projectRoot, "scripts", scriptName);
+            
+            try {
+              const child = spawn("bash", [scriptPath, mode], { detached: true, stdio: "ignore" });
+              child.unref();
+              
+              console.log(`[Hooks Pre-Task] Esperando a que los puertos [${ports.join(", ")}] esten listos...`);
+              const ready = await waitForPortsReady(ports);
+              if (ready) {
+                console.log(`[Hooks Pre-Task] Modelos iniciados y listos en modo ${mode}.`);
+              } else {
+                console.warn(`[Hooks Pre-Task] Advertencia: Algunos modelos no respondieron a tiempo.`);
+              }
+            } catch (err) {
+              console.error(`[Hooks Pre-Task] Error al arrancar lanzador: ${err}`);
+            }
           }
         }
       }

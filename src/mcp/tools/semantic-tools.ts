@@ -1,33 +1,43 @@
-/**
- * Semantic tools — semantic routing via aiyoucli-proxy NAPI.
- */
-
 import type { MCPTool, MCPToolResult } from "../../types.js";
+import { createProxyEngine, type ProxyEngineHandle } from "../../napi/proxy.js";
+import { computeHybridScores } from "../../semantic/agent-profiles.js";
 
-function text(t: string): MCPToolResult { return { content: [{ type: "text", text: t }] }; }
-function json(d: unknown): MCPToolResult { return { content: [{ type: "text", text: JSON.stringify(d, null, 2) }] }; }
+let engine: ProxyEngineHandle | null = null;
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let proxyEngine: any = null;
-
-function createProxyEngine() {
-  try {
-    const mod = require("../../napi/proxy.js");
-    return mod.getProxyEngine?.() ?? null;
-  } catch {
-    return null;
+function getEngine(): ProxyEngineHandle {
+  if (!engine) {
+    engine = createProxyEngine();
   }
+  return engine;
 }
 
-function getEngine() {
-  if (!proxyEngine) proxyEngine = createProxyEngine();
-  return proxyEngine;
+async function runHybridRoute(task: string): Promise<Record<string, unknown>> {
+  const e = getEngine();
+  const kwResult = e.semanticRoute(task);
+  const scores = await computeHybridScores(task, e);
+  const hybridResult = e.semanticRouteHybrid(task, scores);
+  return {
+    route: hybridResult.route,
+    confidence: hybridResult.confidence,
+    model_tier: hybridResult.model_tier,
+    method: "hybrid",
+    keyword_result: kwResult,
+    hybrid_result: hybridResult,
+  };
+}
+
+function text(t: string): MCPToolResult {
+  return { content: [{ type: "text", text: t }] };
+}
+
+function json(d: unknown): MCPToolResult {
+  return { content: [{ type: "text", text: JSON.stringify(d, null, 2) }] };
 }
 
 export const semanticTools: MCPTool[] = [
   {
     name: "semantic_route",
-    description: "Route a task to the optimal agent type using keyword matching",
+    description: "Route a task description to the best agent type using keyword matching (8 agents: coder, tester, reviewer, architect, security, debugger, researcher, documenter)",
     inputSchema: {
       type: "object",
       properties: {
@@ -36,62 +46,46 @@ export const semanticTools: MCPTool[] = [
       required: ["task"],
     },
     handler: async (input) => {
-      const engine = getEngine();
-      if (!engine) return text("Semantic router not available");
       try {
-        return json(engine.semanticRoute(input.task as string));
-      } catch (err) {
-        return text(`Semantic route error: ${err instanceof Error ? err.message : String(err)}`);
+        const result = getEngine().semanticRoute(input.task as string);
+        return json(result);
+      } catch (e) {
+        return text(`Error: ${(e as Error).message}`);
       }
     },
   },
+
   {
     name: "semantic_route_hybrid",
-    description: "Route a task with custom embedding scores (keyword + embedding hybrid)",
+    description: "Route a task with hybrid keyword + embedding scores for higher precision",
     inputSchema: {
       type: "object",
       properties: {
-        task: { type: "string", description: "Task description" },
-        embedding: { type: "array", items: { type: "number" }, description: "Pre-computed embedding" },
+        task: { type: "string", description: "Task description to route" },
+        embedding_scores: {
+          type: "object",
+          description: "Embedding scores per agent: {\"coder\": 0.8, \"tester\": 0.2, ...}",
+          additionalProperties: { type: "number" },
+        },
       },
-      required: ["task"],
+      required: ["task", "embedding_scores"],
     },
     handler: async (input) => {
-      const engine = getEngine();
-      if (!engine) return text("Semantic router not available");
       try {
-        return json(engine.semanticRouteHybrid(
+        const result = getEngine().semanticRouteHybrid(
           input.task as string,
-          input.embedding as number[] | undefined,
-        ));
-      } catch (err) {
-        return text(`Semantic route hybrid error: ${err instanceof Error ? err.message : String(err)}`);
+          input.embedding_scores as Record<string, number>
+        );
+        return json(result);
+      } catch (e) {
+        return text(`Error: ${(e as Error).message}`);
       }
     },
   },
-  {
-    name: "semantic_route_enhanced",
-    description: "Auto hybrid route — combines keyword matching with gateway embeddings",
-    inputSchema: {
-      type: "object",
-      properties: {
-        task: { type: "string", description: "Task description" },
-      },
-      required: ["task"],
-    },
-    handler: async (input) => {
-      const engine = getEngine();
-      if (!engine) return text("Semantic router not available");
-      try {
-        return json(engine.semanticRouteEnhanced(input.task as string));
-      } catch (err) {
-        return text(`Semantic route enhanced error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    },
-  },
+
   {
     name: "semantic_embed",
-    description: "Get keyword embedding vector for a text (8-dim)",
+    description: "Get an 8-dimension keyword-based embedding vector for a text",
     inputSchema: {
       type: "object",
       properties: {
@@ -100,26 +94,48 @@ export const semanticTools: MCPTool[] = [
       required: ["text"],
     },
     handler: async (input) => {
-      const engine = getEngine();
-      if (!engine) return text("Semantic router not available");
       try {
-        return json(engine.semanticEmbed(input.text as string));
-      } catch (err) {
-        return text(`Semantic embed error: ${err instanceof Error ? err.message : String(err)}`);
+        const embedding = getEngine().semanticEmbed(input.text as string);
+        return json({ embedding, dimensions: embedding.length });
+      } catch (e) {
+        return text(`Error: ${(e as Error).message}`);
       }
     },
   },
+
   {
     name: "semantic_stats",
-    description: "Get semantic router configuration and agent statistics",
-    inputSchema: { type: "object", properties: {} },
+    description: "Get semantic router statistics — agents, keywords, patterns, config",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
     handler: async () => {
-      const engine = getEngine();
-      if (!engine) return text("Semantic router not available");
       try {
-        return json(engine.semanticStats());
-      } catch (err) {
-        return text(`Semantic stats error: ${err instanceof Error ? err.message : String(err)}`);
+        const stats = getEngine().semanticStats();
+        return json(stats);
+      } catch (e) {
+        return text(`Error: ${(e as Error).message}`);
+      }
+    },
+  },
+
+  {
+    name: "semantic_route_enhanced",
+    description: "Route a task using hybrid keyword + embedding (via gateway) for highest accuracy. Combines keyword matching with embedding similarity.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "Task description to route" },
+      },
+      required: ["task"],
+    },
+    handler: async (input) => {
+      try {
+        const result = await runHybridRoute(input.task as string);
+        return json(result);
+      } catch (e) {
+        return text(`Error: ${(e as Error).message}`);
       }
     },
   },

@@ -1235,6 +1235,56 @@ const skillsCommand: Command = {
   ],
 };
 
+// ── 25. proxy ───────────────────────────────────────────────────────
+
+const proxyCommand: Command = {
+  name: "proxy",
+  description: "Manage LLM proxy gateway (clean cache, optimize context)",
+  examples: [
+    { command: "aiyoucli proxy clean", description: "Clear LLM proxy response cache" },
+    { command: "aiyoucli proxy optimize", description: "Clear cache and optimize/compress git context" }
+  ],
+  subcommands: [
+    {
+      name: "clean",
+      description: "Clear LLM proxy response cache",
+      action: async () => {
+        ensureTools();
+        const result = await callTool("proxy_optimize_context", { messages: [], clear_cache: true, include_git: false });
+        if (result.isError) {
+          output.error(result.content[0]?.text || "Error");
+        } else {
+          output.log(color.green("✓ Caché del proxy LLM limpiada correctamente."));
+        }
+      }
+    },
+    {
+      name: "optimize",
+      description: "Clear cache and retrieve condensed Git context (GCC)",
+      action: async () => {
+        ensureTools();
+        const result = await callTool("proxy_optimize_context", { messages: [], clear_cache: true, include_git: true });
+        if (result.isError) {
+          output.error(result.content[0]?.text || "Error");
+        } else {
+          try {
+            const data = JSON.parse(result.content[0]?.text || "{}");
+            output.log(color.green("✓ Caché limpiada y contexto de Git condensado obtenido."));
+            const gitMsg = data.optimized_messages?.find((m: any) => m.role === "system" && m.content.includes("Git Workspace Status"));
+            if (gitMsg) {
+              output.log(color.cyan("\n" + gitMsg.content));
+            } else {
+              output.log(color.yellow("\n(Sin cambios en Git o repositorio no detectado)"));
+            }
+          } catch {
+            output.log(color.red("Error al parsear el resultado de la optimización."));
+          }
+        }
+      }
+    }
+  ]
+};
+
 // ── Export ──────────────────────────────────────────────────────────
 
 export const commands: Command[] = [
@@ -1262,4 +1312,5 @@ export const commands: Command[] = [
   modelsCommand,
   rdCommand,
   skillsCommand,
+  proxyCommand,
 ];
